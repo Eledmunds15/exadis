@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # ./configure.sh -DSYS=mac_nicolas
 # ./configure.sh build_mac -DSYS=mac_nicolas
