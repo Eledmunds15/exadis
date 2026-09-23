@@ -42,7 +42,7 @@ public:
         //printf("split_multi_nodes\n");
         //if (!network->form_junctions) return;
         
-        int debug = 0;
+        static const bool debug = (getenv("EXADIS_TOPO_DEBUG") != nullptr);
         
         int nmultinodes = 0;
         int nsplits = 0;
