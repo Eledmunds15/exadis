@@ -1,6 +1,6 @@
 set(TARGETS
-    stress_field
     dispgrad_field
+    stress_field
 )
 
 foreach(TARGET_NAME IN LISTS TARGETS)

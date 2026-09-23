@@ -12,6 +12,7 @@
 #include "cli_parser.h"
 
 using namespace ExaDiS;
+using namespace ExaDiS::fields;
 using namespace ExaDiS::tools;
 
 /*---------------------------------------------------------------------------

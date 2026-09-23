@@ -360,6 +360,8 @@ void System::print_timers(double timetot, bool dev)
     ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Collision time:", timer[TIMER_COLLISION].accumtime, ftime[TIMER_COLLISION]);
     ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Topology time:", timer[TIMER_TOPOLOGY].accumtime, ftime[TIMER_TOPOLOGY]);
     ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Remesh time:", timer[TIMER_REMESH].accumtime, ftime[TIMER_REMESH]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Stress Field time:", timer[TIMER_STRESSFIELD].accumtime, ftime[TIMER_STRESSFIELD]);
+    ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Phase Field time:", timer[TIMER_PHASEFIELD].accumtime, ftime[TIMER_PHASEFIELD]);
     ExaDiS_log("%-20s %11.3f sec (%.2f%%)\n", "Output time:", timer[TIMER_OUTPUT].accumtime, ftime[TIMER_OUTPUT]);
     ExaDiS_log("----------------------------------------------\n");
     if (dev && numdevtimer > 0) {

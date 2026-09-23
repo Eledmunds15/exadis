@@ -32,6 +32,7 @@ public:
     Topology* topology = nullptr;
     Remesh* remesh = nullptr;
     CrossSlip* crossslip = nullptr;
+    PhaseField* phasefield = nullptr;
     std::string outputdir = "";
     
     bool dealloc = true;
@@ -121,7 +122,8 @@ public:
         Collision* _collision,
         Topology* _topology,
         Remesh* _remesh,
-        CrossSlip* _crossslip = nullptr
+        CrossSlip* _crossslip = nullptr,
+        PhaseField* _phasefield = nullptr
     );
     virtual void set_simulation(std::string restartfile="");
     virtual void set_directory();

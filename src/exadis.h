@@ -34,6 +34,9 @@
 #include "topology.h"
 #include "remesh.h"
 #include "cross_slip.h"
+#include "fields.h"
+#include "stress_field.h"
+#include "phase_field.h"
 
 #include "functions.h"
 

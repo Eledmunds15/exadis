@@ -17,7 +17,7 @@
 #include "system.h"
 #include "fields.h"
 
-namespace ExaDiS { namespace tools {
+namespace ExaDiS { namespace fields {
 
 /*---------------------------------------------------------------------------
  *
@@ -211,6 +211,6 @@ struct DispGradIso {
 template<class N>
 using DispGradFieldGrid = FieldGrid<DispGradIso, N>;
 
-} } // namespace ExaDiS::tools
+} } // namespace ExaDiS::fields
 
 #endif

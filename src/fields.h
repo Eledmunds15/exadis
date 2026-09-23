@@ -13,7 +13,7 @@
 
 #include "system.h"
 
-namespace ExaDiS { namespace tools {
+namespace ExaDiS { namespace fields {
 
 /*---------------------------------------------------------------------------
  *
@@ -433,6 +433,6 @@ typename F::T_val field_point(N* net, typename F::Params params, const Vec3& p, 
     return val(0);
 }
 
-} } // namespace ExaDiS::tools
+} } // namespace ExaDiS::fields
 
 #endif

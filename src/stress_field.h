@@ -16,7 +16,7 @@
 #include "system.h"
 #include "fields.h"
 
-namespace ExaDiS { namespace tools {
+namespace ExaDiS { namespace fields {
 
 /*---------------------------------------------------------------------------
  *
@@ -276,6 +276,50 @@ struct StressIso {
 template<class N>
 using StressFieldGrid = FieldGrid<StressIso, N>;
 
-} } // namespace ExaDiS::tools
+/*---------------------------------------------------------------------------
+ *
+ *    Functions:    write_vtk_header() / write_vtk_scalar()
+ *                  Generic helpers to write a regular grid field to a
+ *                  legacy VTK STRUCTURED_POINTS file. Several fields can
+ *                  be written to the same file by calling
+ *                  write_vtk_header() once followed by multiple calls
+ *                  to write_vtk_scalar().
+ *
+ *                  Note: assumes an axis-aligned, non-triclinic Cell -
+ *                  legacy VTK STRUCTURED_POINTS has no support for
+ *                  sheared/triclinic grids.
+ *
+ *-------------------------------------------------------------------------*/
+inline void write_vtk_header(FILE* fp, Cell& cell, std::vector<int>& Ngrid)
+{
+    if (cell.is_triclinic())
+        ExaDiS_fatal("Error: write_vtk_header() does not support triclinic cells\n");
+
+    Vec3 origin = cell.origin;
+    Vec3 spacing(cell.H.xx()/Ngrid[0], cell.H.yy()/Ngrid[1], cell.H.zz()/Ngrid[2]);
+
+    fprintf(fp, "# vtk DataFile Version 3.0\n");
+    fprintf(fp, "Field exported from ExaDiS\n");
+    fprintf(fp, "ASCII\n");
+    fprintf(fp, "DATASET STRUCTURED_POINTS\n");
+    fprintf(fp, "DIMENSIONS %d %d %d\n", Ngrid[0], Ngrid[1], Ngrid[2]);
+    fprintf(fp, "ORIGIN %e %e %e\n", origin.x, origin.y, origin.z);
+    fprintf(fp, "SPACING %e %e %e\n", spacing.x, spacing.y, spacing.z);
+    fprintf(fp, "POINT_DATA %d\n", Ngrid[0]*Ngrid[1]*Ngrid[2]);
+}
+
+template<class GetVal>
+void write_vtk_scalar(FILE* fp, const char* name, std::vector<int>& Ngrid, GetVal getval)
+{
+    fprintf(fp, "SCALARS %s float 1\n", name);
+    fprintf(fp, "LOOKUP_TABLE default\n");
+    // VTK point ordering for STRUCTURED_POINTS: x fastest, then y, then z
+    for (int kz = 0; kz < Ngrid[2]; kz++)
+        for (int ky = 0; ky < Ngrid[1]; ky++)
+            for (int kx = 0; kx < Ngrid[0]; kx++)
+                fprintf(fp, "%e\n", getval(kx, ky, kz));
+}
+
+} } // namespace ExaDiS::fields
 
 #endif
