@@ -1183,7 +1183,7 @@ PYBIND11_MODULE(pyexadis, m) {
         .def("pre_compute_force", &ForceBind::pre_compute_force, "Wrapper to perform pre-computations before compute_node_force()",
              py::arg("net"))
         .def("compute_node_force", &ForceBind::compute_node_force, "Wrapper to compute the force on a single node",
-             py::arg("net"), py::arg("i"), py::arg("applied_stress"));
+             py::arg("net"), py::arg("i"), py::arg("applied_stress"), py::arg("match_global")=false);
     
     // Force wrappers
     m.def("compute_force_n2", &compute_force_n2, "Compute elastic forces using the brute-force N^2 calculation",

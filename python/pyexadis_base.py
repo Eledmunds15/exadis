@@ -297,7 +297,8 @@ class CalForce:
         self.force.pre_compute_force(G.net)
         return state
     
-    def OneNodeForce(self, N: DisNetManager, state: dict, tag: Tag, update_state=True) -> np.array:
+    def OneNodeForce(self, N: DisNetManager, state: dict, tag: Tag,
+                     update_state=True, match_global=False) -> np.array:
         applied_stress = state["applied_stress"]
         G = N.get_disnet(ExaDisNet)
         # find node index
@@ -306,7 +307,7 @@ class CalForce:
         if ind.size != 1:
             raise ValueError("Cannot find node tag (%d,%d) in OneNodeForce" % tuple(tag))
         # compute node force
-        f = self.force.compute_node_force(G.net, ind[0], applied_stress=applied_stress)
+        f = self.force.compute_node_force(G.net, ind[0], applied_stress=applied_stress, match_global=match_global)
         f = np.array(f)
         # update force dictionary if needed
         if update_state:

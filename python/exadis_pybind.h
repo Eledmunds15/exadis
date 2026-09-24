@@ -290,15 +290,18 @@ struct ForceBind {
         return forces;
     }
     Vec3 compute_node_force(ExaDisNet& disnet, int i, 
-                            std::vector<double> applied_stress) {
+                            std::vector<double> applied_stress,
+                            bool match_global) {
         System* system = disnet.adjust_system(params);
         system->extstress = Mat33().voigt(applied_stress.data());
+        system->node_force_matches_compute = match_global; // set node_force() behavior
         // Warning: the user must ensure the pre_compute is up-to-date...
         if (!pre_computed) {
             force->pre_compute(system);
             pre_computed = true;
         }
         Vec3 f = force->node_force(system, i);
+        system->node_force_matches_compute = false; // reset default behavior
         return f;
     }
 };
