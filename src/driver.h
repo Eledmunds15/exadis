@@ -32,7 +32,7 @@ public:
     Topology* topology = nullptr;
     Remesh* remesh = nullptr;
     CrossSlip* crossslip = nullptr;
-    PhaseField* phasefield = nullptr;
+    ChemoMechanics* chemomech = nullptr;
     std::string outputdir = "";
     
     bool dealloc = true;
@@ -123,7 +123,7 @@ public:
         Topology* _topology,
         Remesh* _remesh,
         CrossSlip* _crossslip = nullptr,
-        PhaseField* _phasefield = nullptr
+        ChemoMechanics* _chemomech = nullptr
     );
     virtual void set_simulation(std::string restartfile="");
     virtual void set_directory();

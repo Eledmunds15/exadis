@@ -36,7 +36,7 @@
 #include "cross_slip.h"
 #include "fields.h"
 #include "stress_field.h"
-#include "phase_field.h"
+#include "chemo_mechanics.h"
 
 #include "functions.h"
 

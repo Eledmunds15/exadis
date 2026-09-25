@@ -98,7 +98,7 @@ void test_C1(ExaDiSApp* exadis)
     exadis->collision = new CollisionRetroactive(system);
     exadis->topology = new TopologySerial(system, exadis->force, exadis->mobility);
     exadis->remesh = new RemeshSerial(system);
-    exadis->phasefield = new PhaseFieldLocal(system, {32, 32, 32}, outputdir);
+    exadis->chemomech = new ChemoMechanicsVacancyDiffusion(system, {32, 32, 32}, outputdir);
 
     // Simulation setup
     exadis->outputdir = outputdir;

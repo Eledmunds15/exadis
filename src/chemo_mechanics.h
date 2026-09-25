@@ -8,8 +8,8 @@
  *-------------------------------------------------------------------------*/
 
 #pragma once
-#ifndef EXADIS_PHASE_FIELD_H
-#define EXADIS_PHASE_FIELD_H
+#ifndef EXADIS_CHEMO_MECHANICS_H
+#define EXADIS_CHEMO_MECHANICS_H
 
 #include "system.h"
 
@@ -17,26 +17,26 @@ namespace ExaDiS {
 
 /*---------------------------------------------------------------------------
  *
- *    Class:        PhaseField
+ *    Class:        ChemoMechanics
  *
  *-------------------------------------------------------------------------*/
-class PhaseField {
+class ChemoMechanics {
 public:
-    PhaseField() {}
-    PhaseField(System *system) {}
+    ChemoMechanics() {}
+    ChemoMechanics(System *system) {}
     virtual void step(System *system) = 0;
-    virtual ~PhaseField() {}
-    virtual const char* name() { return "PhaseFieldNone"; }
+    virtual ~ChemoMechanics() {}
+    virtual const char* name() { return "ChemoMechanicsNone"; }
 };
 
 /*---------------------------------------------------------------------------
  *
- *    Class:        PhaseFieldLocal
- *                  Base class for phase field model driven by stress fields 
+ *    Class:        ChemoMechanicsVacancyDiffusion
+ *                  Base class for chemo-mechanical model driven by stress fields 
  *                  extracted from DDD
  *
  *-------------------------------------------------------------------------*/
-class PhaseFieldLocal : public PhaseField {
+class ChemoMechanicsVacancyDiffusion : public ChemoMechanics {
 public:
     std::vector<int> Ngrid;
     std::string outputdir = ".";
@@ -45,14 +45,14 @@ public:
     int step_count = 0;
 
     double D = 1.0;       // vacancy diffusion coefficient (placeholder value/units for now)
-    double dt_pf = 100.0; // phase field internal timestep (explicit Euler - must satisfy dt <= dx^2/(6D))
+    double dt_diff = 100.0; // diffusion internal timestep (explicit Euler - must satisfy dt <= dx^2/(6D))
 
     // Persistent concentration field - unlike the stress field (rebuilt from
     // the network every call), this is real evolving state that must survive
     // between calls to step().
     Kokkos::View<double***, Kokkos::LayoutRight, Kokkos::SharedSpace> concentration;
 
-    PhaseFieldLocal(System* system, std::vector<int> _Ngrid, std::string _outputdir = ".")
+    ChemoMechanicsVacancyDiffusion(System* system, std::vector<int> _Ngrid, std::string _outputdir = ".")
         : Ngrid(_Ngrid), outputdir(_outputdir)
     {
         Kokkos::resize(concentration, Ngrid[0], Ngrid[1], Ngrid[2]);
@@ -82,7 +82,7 @@ public:
         Kokkos::resize(c_new, Nx, Ny, Nz);
 
         auto c = concentration;
-        double Dloc = D, dtloc = dt_pf;
+        double Dloc = D, dtloc = dt_diff;
 
         Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0,0,0}, {Nx, Ny, Nz}),
             KOKKOS_LAMBDA(const int i, const int j, const int k) {
@@ -102,7 +102,7 @@ public:
     }
 
     void step(System* system) {
-        ExaDiS_log("PhaseField::step()\n");
+        ExaDiS_log("ChemoMechanics::step()\n");
 
         if (step_count % compute_freq == 0) {
             Kokkos::fence();
@@ -119,12 +119,12 @@ public:
             system->timer[system->TIMER_STRESSFIELD].stop();
 
             Kokkos::fence();
-            system->timer[system->TIMER_PHASEFIELD].start();
+            system->timer[system->TIMER_CHEMOMECH].start();
 
             diffusion_step(net->cell);
 
             if (step_count % write_freq == 0) {
-                std::string filename = outputdir + "/phasefield." + std::to_string(step_count) + ".vtk";
+                std::string filename = outputdir + "/chemomech." + std::to_string(step_count) + ".vtk";
                 FILE* fp = fopen(filename.c_str(), "w");
                 if (fp == NULL)
                     ExaDiS_fatal("Error: cannot open output file %s\n", filename.c_str());
@@ -142,15 +142,15 @@ public:
                 fields::write_vtk_scalar(fp, "Concentration", Ngrid, [&](int kx, int ky, int kz) { return c(kx,ky,kz); });
 
                 fclose(fp);
-                ExaDiS_log("Writing phase field VTK file: %s\n", filename.c_str());
+                ExaDiS_log("Writing chemo-mechanics VTK file: %s\n", filename.c_str());
             }
 
-            system->timer[system->TIMER_PHASEFIELD].stop();
+            system->timer[system->TIMER_CHEMOMECH].stop();
         }
         step_count++;
     }
 
-    const char* name() { return "PhaseFieldLocal"; }
+    const char* name() { return "ChemoMechanicsVacancyDiffusion"; }
 };
 
 } // namespace ExaDiS

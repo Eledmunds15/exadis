@@ -65,7 +65,7 @@ ExaDiSApp::~ExaDiSApp()
     if (mobility) delete mobility;
     if (integrator) delete integrator;
     if (crossslip) delete crossslip;
-    if (phasefield) delete phasefield;
+    if (chemomech) delete chemomech;
     if (collision) delete collision;
     if (topology) delete topology;
     if (remesh) delete remesh;
@@ -86,7 +86,7 @@ void ExaDiSApp::set_modules(
     Topology* _topology,
     Remesh* _remesh,
     CrossSlip* _crossslip,
-    PhaseField* _phasefield)
+    ChemoMechanics* _chemomech)
 {
     force = _force;
     mobility = _mobility;
@@ -95,7 +95,7 @@ void ExaDiSApp::set_modules(
     topology = _topology;
     remesh = _remesh;
     crossslip = _crossslip;
-    phasefield = _phasefield;
+    chemomech = _chemomech;
 }
 
 /*---------------------------------------------------------------------------
@@ -662,8 +662,8 @@ void ExaDiSApp::step(Control& ctrl)
     remesh->remesh(system);
 
     // Phase-Field
-    if (phasefield)
-        phasefield->step(system);
+    if (chemomech)
+        chemomech->step(system);
     
     // Update stress
     update_mechanics(ctrl);
