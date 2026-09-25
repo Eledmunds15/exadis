@@ -1984,7 +1984,7 @@ void CollisionRetroactive::retroactive_collision_parallel(System* system)
         Vec3 p2 = network->cell.pbc_position(p1, network->nodes[n2].pos);
         Vec3 l12 = p1-p2;
             
-        Vec3 p3 = network->cell.pbc_position(p1, network->nodes[n3].pos);
+        Vec3 p3 = network->nodes[n3].pos; // no need to pbc wrt segment 12 here
         Vec3 p4 = network->cell.pbc_position(p3, network->nodes[n4].pos);
         Vec3 l34 = p3-p4;
         

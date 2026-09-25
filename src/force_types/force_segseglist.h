@@ -597,20 +597,49 @@ public:
         SerialDisNet* net = system->get_serial_network();
         auto nodes = net->get_nodes();
         auto conn = net->get_conn();
+        auto segs = net->get_segs();
+
+        Vec3 f(0.0);
         
         // Recompute neighbor list for now...
         NeighborBin* neighbor = generate_neighbor_segs(net, segseglist->cutoff, system->params.maxseg);
-        
-        auto neilist = neighbor->query(nodes[i].pos);
-        
-        Vec3 f(0.0);
-        for (int j = 0; j < conn[i].num; j++) {
-            int k = conn[i].seg[j];
-            for (int l = 0; l < neilist.size(); l++) {
-                int n = neilist[l];
-                if (n == k) continue;
-                SegSegForce fs = force->segseg_force(system, net, SegSeg(k, n), 1, 0);
-                f += ((conn[i].order[j] == 1) ? fs.f1 : fs.f2);
+
+        if (system->node_force_matches_compute) {
+            // Per-arm calculation matching global compute()
+            // This version queries the neighbors per arm, at the arm's mid-point, 
+            // and enforces the cutoff on the true segment-to-segment distance, 
+            // exactly as the global compute() does.
+            double cutoff2 = segseglist->cutoff * segseglist->cutoff;
+            for (int j = 0; j < conn[i].num; j++) {
+                int k = conn[i].seg[j];
+                Vec3 r1 = nodes[segs[k].n1].pos;
+                Vec3 r2 = net->cell.pbc_position(r1, nodes[segs[k].n2].pos);
+                auto neilist = neighbor->query(net->cell.pbc_fold(0.5*(r1+r2)));
+                for (int l = 0; l < neilist.size(); l++) {
+                    int n = neilist[l];
+                    if (n == k) continue;
+                    double dist2 = get_min_dist2_segseg(net, k, n);
+                    if (dist2 < 0.0 || dist2 >= cutoff2) continue;
+                    SegSegForce fs = force->segseg_force(system, net, SegSeg(k, n), 1, 0);
+                    f += ((conn[i].order[j] == 1) ? fs.f1 : fs.f2);
+                }
+            }
+        } else {
+            // Topology-oriented calculation matching team node_force()
+            // This version queries the segment neighbors to the node position
+            // once and reuses that list for every arm. This will make the resulting
+            // force disagree with the global compute() as soon as any pair exceeds
+            // the cutoff. But this will make the result agree with the team node_force()
+            // implementation below. This is to be used within Topology, etc.
+            auto neilist = neighbor->query(nodes[i].pos);
+            for (int j = 0; j < conn[i].num; j++) {
+                int k = conn[i].seg[j];
+                for (int l = 0; l < neilist.size(); l++) {
+                    int n = neilist[l];
+                    if (n == k) continue;
+                    SegSegForce fs = force->segseg_force(system, net, SegSeg(k, n), 1, 0);
+                    f += ((conn[i].order[j] == 1) ? fs.f1 : fs.f2);
+                }
             }
         }
         

@@ -52,6 +52,11 @@ public:
     void plastic_strain();
     void reset_glide_planes();
     void write_config(std::string filename);
+
+    // Flag used to make the segseg node_force() match
+    // the global force compute(), see force_segseglist.h.
+    // Default behavior = false
+    bool node_force_matches_compute = false;
     
     OpRec* oprec = nullptr;
     
