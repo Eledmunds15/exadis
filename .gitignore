@@ -2,6 +2,8 @@
 build/
 build*/
 
+PRIVATE/
+
 # Stray CMake artifacts (e.g. from running cmake outside build/)
 CMakeCache.txt
 CMakeFiles/
