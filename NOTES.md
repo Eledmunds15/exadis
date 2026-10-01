@@ -8,12 +8,12 @@ Note: `configure.sh` wipes `build/` and starts fresh.
 
 CPU
 ```
-./configure.sh -DEXADIS_BUILD_EXAMPLES=On -DEXADIS_BUILD_TESTS=On
+bash ./configure.sh -DEXADIS_BUILD_EXAMPLES=On -DEXADIS_BUILD_TESTS=On
 ```
 
 GPU
 ```
-./configure.sh -DKokkos_ENABLE_CUDA=On -DKokkos_ENABLE_CUDA_LAMBDA=On -DKokkos_ARCH_ADA89=On -DEXADIS_BUILD_EXAMPLES=On -DEXADIS_BUILD_TESTS=On
+bash ./configure.sh -DKokkos_ENABLE_CUDA=On -DKokkos_ENABLE_CUDA_LAMBDA=On -DKokkos_ARCH_ADA89=On -DEXADIS_BUILD_EXAMPLES=On -DEXADIS_BUILD_TESTS=On
 ```
 
 ### 2. Build
