@@ -32,6 +32,7 @@ public:
     Topology* topology = nullptr;
     Remesh* remesh = nullptr;
     CrossSlip* crossslip = nullptr;
+    Diffusion* diffusion = nullptr;
     std::string outputdir = "";
     
     bool dealloc = true;

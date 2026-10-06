@@ -34,6 +34,7 @@
 #include "topology.h"
 #include "remesh.h"
 #include "cross_slip.h"
+#include "diffusion.h"
 
 #include "functions.h"
 

@@ -68,6 +68,7 @@ ExaDiSApp::~ExaDiSApp()
     if (collision) delete collision;
     if (topology) delete topology;
     if (remesh) delete remesh;
+    if (diffusion) delete diffusion;
 }
 
 /*---------------------------------------------------------------------------
@@ -631,6 +632,10 @@ void ExaDiSApp::step(Control& ctrl)
     
     // Nodal force calculation
     force->compute(system);
+
+    // Diffusion calculation
+    if (diffusion)
+        diffusion->compute(system);
     
     // Mobility calculation
     mobility->compute(system);

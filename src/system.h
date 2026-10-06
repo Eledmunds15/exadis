@@ -72,7 +72,7 @@ public:
         void start() { timer.reset(); }
         void stop() { accumtime += timer.seconds(); }
     };
-    enum timers {TIMER_FORCE, TIMER_MOBILITY, TIMER_INTEGRATION, TIMER_CROSSSLIP,
+    enum timers {TIMER_FORCE, TIMER_MOBILITY, TIMER_INTEGRATION, TIMER_CROSSSLIP, TIMER_DIFFUSION,
                  TIMER_COLLISION, TIMER_TOPOLOGY, TIMER_REMESH, TIMER_OUTPUT, TIMER_END};
     SystemTimer timer[TIMER_END];
     

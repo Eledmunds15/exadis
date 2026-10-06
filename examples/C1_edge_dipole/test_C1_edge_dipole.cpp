@@ -131,6 +131,7 @@ void test_C1_edge_dipole(ExaDiSApp* exadis)
         ForceType::CORE_SELF_PKEXT::Params(),
         ForceType::LONG_FFT_SHORT_ISO::Params(Ngrid)
     );
+    exadis->diffusion = new Diffusion();
     exadis->mobility = exadis_new<MobilityType::GLIDE>(system, MobilityType::GLIDE::Params(Mob));
     exadis->integrator = new IntegratorEuler(system);
     exadis->collision = new CollisionRetroactive(system);
