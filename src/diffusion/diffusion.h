@@ -282,10 +282,13 @@ public:
         int N = Ngrid, m = N/2;
         double h = L[0]/N, A = L[0]*L[1];
 
-        // Short range correction for an infitnite straight line
+        
+        Vec3 o = cell.origin;
+        double hh = L[0]/Ngrid;
         auto delta = [&](double r) {
-            double R2 = r*r + a*a;
-            return lam/(4.0*M_PI*D) * (log(r*r) - log(R2) + a*a/R2);
+            // grid point (i, m, 0): voxel centre, r = (i - m)*h from the line along x
+            Vec3 x(o.x + (m + 0.5)*hh + r, o.y + (m + 0.5)*hh, o.z + 0.5*hh);
+            return line_correction(x, lam, a, 8);
         };
 
         int iref = m + 8;
@@ -341,6 +344,50 @@ public:
 
         FFT3DTransform(plan, c, c, FFT_BACKWARD);
         Kokkos::fence();
+    }
+
+    double segment_correction(Vec3 x, Vec3 r1, Vec3 r2, double lam, double a) {
+        r2 = cell.pbc_position(r1, r2);
+        Vec3 mid = 0.5*(r1 + r2);
+        Vec3 shift = cell.pbc_position(x, mid) - mid;
+        r1 = r1 + shift;
+        r2 = r2 + shift;
+
+        Vec3 seg = r2 - r1;
+        double len = seg.norm();
+        if (len < 1e-10) return 0.0;
+        Vec3 t = (1.0/len) * seg;
+
+        double z1 = dot(r1 - x, t);
+        double z2 = dot(r2 - x, t);
+        double d2 = fmax((r1 - x).norm2() - z1*z1, 0.0);
+        double d = sqrt(d2);
+        double ba = sqrt(d2 + a*a);
+
+        auto I1 = [](double z1, double z2, double b) {
+            return asinh(z2/b) - asinh(z1/b);
+        };
+
+        auto I3 = [](double z1, double z2, double b) {
+            return z2/(b*b*sqrt(z2*z2 + b*b)) - z1/(b*b*sqrt(z1*z1 + b*b));
+        };
+
+        return -lam/(4.0*M_PI*D)*(I1(z1, z2, d) - I1(z1, z2, ba) - 0.5*a*a*I3(z1, z2, ba));
+    }
+
+    double line_correction(Vec3 x, double lam, double a, int nseg) {
+        Vec3 o = cell.origin;
+        double h = L[0]/Ngrid;
+        int m = Ngrid/2;
+        double x0 = o.x + (m + 0.5)*h, y0 = o.y + (m + 0.5)*h;
+        double sum = 0.0;
+
+        for (int s = 0; s < nseg; s++) {
+            Vec3 r1(x0, y0, o.z + s*L[2]/nseg);
+            Vec3 r2(x0, y0, o.z + (s+1)*L[2]/nseg);
+            sum += segment_correction(x, r1, r2, lam, a);
+        }
+        return sum;
     }
 
 };
