@@ -34,6 +34,7 @@ public:
     Kokkos::View<double***, Kokkos::LayoutRight, T_memory_space> wk;
     Cell cell;
     bool initialized = false;
+    Kokkos::View<double*, T_memory_space> cnode;
 
     void initialize(System* system) {
         Mat33 H = system->get_serial_network()->cell.H;
@@ -81,17 +82,17 @@ public:
         
         double Vs = cell.H.det() / ((double)Ngrid*Ngrid*Ngrid);
 
-        deposit_network_serial(net, 1.0);
-        auto c_serial = snapshot();
         deposit_network(system->get_device_network(), 1.0);
-        auto c_par = snapshot();
-        
-        double maxdiff = 0.0;
-        for (int i = 0; i < Ngrid; i++)
-        for (int j = 0; j < Ngrid; j++)
-        for (int k = 0; k < Ngrid; k++)
-            maxdiff = fmax(maxdiff, fabs(c_serial(i,j,k).real() - c_par(i,j,k).real()));
-        printf("max voxel difference %.3e\n", maxdiff);
+        solve_poisson();
+        interpolate_nodes(system->get_device_network());
+
+        auto h_cnode = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cnode);
+        double cmin = 1e300, cmax = -1e300;
+        for (int i = 0; i < (int)h_cnode.extent(0); i++) {
+            cmin = fmin(cmin, h_cnode(i));
+            cmax = fmax(cmax, h_cnode(i));
+        }
+        printf("c at nodes: min %.6e  max %.6e  spread %.2e\n", cmin, cmax, cmax - cmin);
 
         Kokkos::fence();
         system->timer[system->TIMER_DIFFUSION].stop();
@@ -117,6 +118,75 @@ public:
         }
         Kokkos::deep_copy(wk, h_wk);
     }
+
+    KOKKOS_INLINE_FUNCTION
+    static double interpolate_c(const T_grid& c, const Cell& cell, int N, const Vec3& p) {
+        Vec3 s = cell.scaled_position(p);
+
+        double  q[3] = { s.x*N - 0.5, s.y*N - 0.5, s.z*N - 0.5 };
+        int     g[3];
+        double  f[3];
+        for (int d = 0; d < 3; d++) {
+            g[d] = (int)floor(q[d]);
+            f[d] = q[d] - g[d];
+        }
+
+        double sum = 0.0;
+        for (int a = 0; a < 2; a++)
+        for (int b = 0; b < 2; b++)
+        for (int e = 0; e < 2; e++) {
+            double w = (a ? f[0] : 1.0 - f[0])
+                     * (b ? f[1] : 1.0 - f[1])
+                     * (e ? f[2] : 1.0 - f[2]);
+            
+            int i = (g[0] + a) % N; if (i < 0) i += N;
+            int j = (g[1] + b) % N; if (j < 0) j += N;
+            int k = (g[2] + e) % N; if (k < 0) k += N;
+
+            sum += w * c(i, j, k).real();
+        }
+        return sum;
+    }
+
+    double check_interp(int M) {
+        auto c = this->c;
+        Cell cell = this->cell;
+        int N = Ngrid;
+        double maxerr = 0.0;
+
+        Kokkos::parallel_reduce("Diffusion::CheckInterp", M,
+        KOKKOS_LAMBDA(const int n, double& err) {
+            // spread M points around the box (fractional parts of irrational multiples)
+            Vec3 s(fmod(n*0.6180339887, 1.0),
+                   fmod(n*0.4142135624, 1.0),
+                   fmod(n*0.7320508076, 1.0));
+            Vec3 p = cell.real_position(s);
+
+            double got   = interpolate_c(c, cell, N, p);
+            double exact = sin(2.0*M_PI*s.z - M_PI/N);
+            err = fmax(err, fabs(got - exact));
+        }, Kokkos::Max<double>(maxerr));
+
+        return maxerr;
+    }
+
+    void interpolate_nodes(DeviceDisNet* net) {
+        Kokkos::resize(cnode, net->Nnodes_local);
+
+        auto c     = this->c;
+        auto cnode = this->cnode;
+        Cell cell  = this->cell;
+        int N      = Ngrid;
+        auto nodes = net->get_nodes();
+
+        Kokkos::parallel_for("Diffusion::InterpolateNodes", net->Nnodes_local,
+        KOKKOS_LAMBDA(const int i) {
+            cnode(i) = interpolate_c(c, cell, N, nodes[i].pos);
+        });
+        Kokkos::fence();
+    }
+
+
 
     void deposit_segment(T_grid::HostMirror& h_s, Vec3 r1, Vec3 r2, double hval) {
         Vec3 Hs(1.0/Ngrid, 1.0/Ngrid, 1.0/Ngrid);
