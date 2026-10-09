@@ -77,27 +77,21 @@ public:
 
         if (!initialized) initialize(system);
 
-        std::vector<Mat33> stress = fft->export_stress_gridval();
+        SerialDisNet* net = system->get_serial_network();
+        
+        double Vs = cell.H.det() / ((double)Ngrid*Ngrid*Ngrid);
 
-        double smin = 1e300, smax = -1e300, ssum = 0.0;
-        for (size_t i=0; i < stress.size(); i++) {
-            double sh = stress[i].trace() / 3.0;
-            if (sh < smin) smin = sh;
-            if (sh > smax) smax = sh;
-            ssum += sh;
-        }
-        double smean = ssum / stress.size();
-
-        double s0 = 0.05*L[0];
-        double h = L[0]/Ngrid;
-
-        double hval = 1.0, a = 2.0*L[0]/Ngrid;
-        set_line_source(hval, 8);
-        solve_poisson();
-        printf("line source poisson (a=2h): rel. error %.2e\n", check_line(hval, a));
-    
-        printf("line + short-range correction: rel. error %.2e\n",
-               check_line_corrected(hval, a));
+        deposit_network_serial(net, 1.0);
+        auto c_serial = snapshot();
+        deposit_network(system->get_device_network(), 1.0);
+        auto c_par = snapshot();
+        
+        double maxdiff = 0.0;
+        for (int i = 0; i < Ngrid; i++)
+        for (int j = 0; j < Ngrid; j++)
+        for (int k = 0; k < Ngrid; k++)
+            maxdiff = fmax(maxdiff, fabs(c_serial(i,j,k).real() - c_par(i,j,k).real()));
+        printf("max voxel difference %.3e\n", maxdiff);
 
         Kokkos::fence();
         system->timer[system->TIMER_DIFFUSION].stop();
@@ -151,7 +145,7 @@ public:
         for (int jb = jmin; jb <= jmax; jb++)
         for (int kb = kmin; kb <= kmax; kb++) {
             Vec3 bc((ib+0.5)*Hs.x, (jb+0.5)*Hs.y, (kb+0.5)*Hs.z);
-            double W = scale * fft->alpha_box_segment(r1, t, Ls, bc, Hs);
+            double W = scale * ForceFFT::alpha_box_segment(r1, t, Ls, bc, Hs);
 
             int kx = ib % Ngrid; if (kx < 0) kx += Ngrid;
             int ky = jb % Ngrid; if (ky < 0) ky += Ngrid;
@@ -177,6 +171,84 @@ public:
             deposit_segment(h_s, r1, r2, hval);
         }
         Kokkos::deep_copy(c, h_s);
+    }
+
+    void deposit_network_serial(SerialDisNet* net, double hval) {
+        auto h_s = Kokkos::create_mirror_view(c);
+        Kokkos::deep_copy(h_s, complex(0.0, 0.0));
+
+        for (int i = 0; i < net->segs.size(); i++) {
+            Vec3 r1 = net->nodes[net->segs[i].n1].pos;
+            Vec3 r2 = net->nodes[net->segs[i].n2].pos;
+            deposit_segment(h_s, r1, r2, hval);
+        }
+        Kokkos::deep_copy(c, h_s);
+    }
+
+    double total_length(SerialDisNet* net) {
+        double sum = 0.0;
+        for (int i = 0; i < net->segs.size(); i++) {
+            Vec3 r1 = net->nodes[net->segs[i].n1].pos;
+            Vec3 r2 = net->nodes[net->segs[i].n2].pos;
+            r2 = cell.pbc_position(r1, r2);
+            sum += (r2 - r1).norm();
+        }
+        return sum;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    static void deposit_one(const T_grid& c, const Cell& cell, int N, Vec3 r1, Vec3 r2, double hval) {
+        Vec3 Hs(1.0/N, 1.0/N, 1.0/N);
+        double Vs = cell.H.det() / ((double)N*N*N);
+
+        r2 = cell.pbc_position(r1, r2);
+        Vec3 t = r2 - r1;
+        double len = t.norm();
+        if (len < 1e-10) return;
+
+        r1 = cell.scaled_position(r1);
+        r2 = cell.scaled_position(r2);
+
+        double Ls = (r2 - r1).norm();
+        double scale = len / Ls;
+        t = t.normalized();
+
+        int imin = floor((fmin(r1.x, r2.x) - 0.5*Hs.x)/Hs.x);
+        int imax = floor((fmax(r1.x, r2.x) - 0.5*Hs.x)/Hs.x) + 1;
+        int jmin = floor((fmin(r1.y, r2.y) - 0.5*Hs.y)/Hs.y);
+        int jmax = floor((fmax(r1.y, r2.y) - 0.5*Hs.y)/Hs.y) + 1;
+        int kmin = floor((fmin(r1.z, r2.z) - 0.5*Hs.z)/Hs.z);
+        int kmax = floor((fmax(r1.z, r2.z) - 0.5*Hs.z)/Hs.z) + 1;
+
+        for (int ib = imin; ib <= imax; ib++)
+        for (int jb = jmin; jb <= jmax; jb++)
+        for (int kb = kmin; kb <= kmax; kb++) {
+            Vec3 bc((ib+0.5)*Hs.x, (jb+0.5)*Hs.y, (kb+0.5)*Hs.z);
+            double W = scale * ForceFFT::alpha_box_segment(r1, t, Ls, bc, Hs);
+
+            int kx = ib % N; if (kx < 0) kx += N;
+            int ky = jb % N; if (ky < 0) ky += N;
+            int kz = kb % N; if (kz < 0) kz += N;
+
+            Kokkos::atomic_add(&c(kx, ky, kz).real(), W/Vs * hval);
+        }
+    }
+
+    void deposit_network(DeviceDisNet* net, double hval) {
+        Kokkos::deep_copy(c, complex(0.0, 0.0));
+
+        auto c      = this->c;
+        Cell cell   = this->cell;
+        int N       = Ngrid;
+        auto nodes  = net->get_nodes();
+        auto segs   = net->get_segs();
+
+        Kokkos::parallel_for("Diffusion::DepositNetwork", net->Nsegs_local, KOKKOS_LAMBDA(const int i) {
+            Vec3 r1 = nodes[segs[i].n1].pos;
+            Vec3 r2 = nodes[segs[i].n2].pos;
+            deposit_one(c, cell, N, r1, r2, hval);
+        });
+        Kokkos::fence();
     }
 
     double check_line (double lam, double a) {
@@ -212,6 +284,10 @@ public:
         for (int k = 0; k < Ngrid; k++)
             sum += h_c(i,j,k).real();
         return sum;
+    }
+
+    T_grid::HostMirror snapshot() {
+        return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c);
     }
 
     void fft_roundtrip() {

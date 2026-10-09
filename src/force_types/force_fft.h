@@ -476,8 +476,8 @@ public:
     double get_rcgrid() { return rcgrid; }
     
     KOKKOS_INLINE_FUNCTION
-    double alpha_box_segment(const Vec3 &p1, const Vec3 &t, const double &L,
-                             const Vec3 &bc, const Vec3 &H) const
+    static double alpha_box_segment(const Vec3 &p1, const Vec3 &t, const double &L,
+                             const Vec3 &bc, const Vec3 &H)
     {
         double eps = 1e-10;
         Vec3 tinv(1.0/(t.x+eps), 1.0/(t.y+eps), 1.0/(t.z+eps));
