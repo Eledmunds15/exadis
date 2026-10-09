@@ -71,6 +71,22 @@ public:
         Kokkos::fence();
     }
 
+    double dipole_series(Vec3 x, Vec3 x1, Vec3 x2, double lam, double a, int K) {
+        double A = L[0]*L[1];
+        double sum = 0.0;
+        for (int ii = -K; ii <= K; ii++)
+        for (int jj = -K; jj <= K; jj++) {
+            if (ii == 0 && jj == 0) continue;            // k = 0 dropped, as in solve_poisson
+            double kx = 2.0*M_PI*ii/L[0], ky = 2.0*M_PI*jj/L[1];
+            double k2 = kx*kx + ky*ky;
+            double ka = sqrt(k2)*a;
+            double w  = 0.5*ka*ka*std::cyl_bessel_k(2.0, ka);   // same ŵ as init_spreading
+            sum += w/k2 * ( cos(kx*(x.x - x1.x) + ky*(x.y - x1.y))
+                          + cos(kx*(x.x - x2.x) + ky*(x.y - x2.y)) );
+        }
+        return -lam/(D*A) * sum;
+    }
+
     void compute(System* system) { 
         
         Kokkos::fence();
@@ -93,6 +109,28 @@ public:
             cmax = fmax(cmax, h_cnode(i));
         }
         printf("c at nodes: min %.6e  max %.6e  spread %.2e\n", cmin, cmax, cmax - cmin);
+
+        double a = 2.0*L[0]/Ngrid;
+        Vec3 x1(0.25*L[0], 0.25*L[1], 0.0), x2(0.75*L[0], 0.75*L[1], 0.0);
+        double expect = dipole_series(x1, x1, x2, 1.0, a, 100);
+        printf("node c: grid %.6e  series %.6e  rel. error %.2e\n",
+                cmin, expect, fabs(cmin - expect)/fabs(expect));
+
+        auto h_c = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c);
+        double h = L[0]/Ngrid;
+        
+        // int ij[2][2] = { {7, 7}, {7, 8} };
+        int m = Ngrid/4;                                  // line at 0.25*L sits between voxels m-1 and m
+        int ij[2][2] = { {m-1, m-1}, {m-1, m} };
+
+        for (int n = 0; n < 2; n++) {
+            int i = ij[n][0], j = ij[n][1];
+            Vec3 xc((i + 0.5)*h, (j + 0.5)*h, 0.5*h);    // voxel centre
+            double ex = dipole_series(xc, x1, x2, 1.0, a, 100);
+            double gr = h_c(i, j, 0).real();
+            printf("voxel (%d,%d): grid %.6e  series %.6e  rel. error %.2e\n",
+                   i, j, gr, ex, fabs(gr - ex)/fabs(ex));
+        }
 
         Kokkos::fence();
         system->timer[system->TIMER_DIFFUSION].stop();
