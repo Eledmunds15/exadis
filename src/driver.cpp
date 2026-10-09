@@ -632,14 +632,14 @@ void ExaDiSApp::step(Control& ctrl)
     
     // Nodal force calculation
     force->compute(system);
-
-    // Diffusion calculation
-    if (diffusion)
-        diffusion->compute(system);
     
     // Mobility calculation
     mobility->compute(system);
     
+    // Diffusion calculation
+    if (diffusion)
+        diffusion->compute(system);
+
     // Time-integration
     integrator->integrate(system);
     oprec_save_integration(ctrl);

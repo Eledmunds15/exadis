@@ -29,12 +29,20 @@ public:
     typedef Kokkos::View<complex***, Kokkos::LayoutRight, T_memory_space> T_grid;
     T_grid c;
     double L[3];
-    double D = 1.0;
+    double D = 1e8;
     FFTPlan<> plan;
     Kokkos::View<double***, Kokkos::LayoutRight, T_memory_space> wk;
     Cell cell;
     bool initialized = false;
     Kokkos::View<double*, T_memory_space> cnode;
+    
+    typedef Kokkos::View<double*, T_memory_space> T_nodeval;
+    double burgmag = 2.48e-10;               // m
+    double Omega   = 0.7698*pow(burgmag, 3); // atomic volume, m^3 (bcc: 0.7698 b^3)
+    double kT      = 1.380649e-23*800.0;     // J (T = 800 K)
+    double c0      = 1.0;                    // equilibrium vacancy fraction (scales v linearly)
+    double rd      = 1.0;                    // core radius r_d, in b
+    double a0      = sqrt(M_E)*rd;          // Cai core width = sqrt(e)*r_d  (decision #1)
 
     void initialize(System* system) {
         Mat33 H = system->get_serial_network()->cell.H;
@@ -87,53 +95,63 @@ public:
         return -lam/(D*A) * sum;
     }
 
-    void compute(System* system) { 
-        
+    void compute(System* system) {
+
         Kokkos::fence();
         system->timer[system->TIMER_DIFFUSION].start();
 
         if (!initialized) initialize(system);
 
+        // solve for h and the climb velocity at every node
+        std::vector<Vec3> vcl; std::vector<double> hcl; int cit;
+        climb_velocity(system, vcl, hcl, cit);
+
+        // add climb on top of the glide velocity from mobility.
+        // Re-fetch: apply_A switched the active copy, so make the serial one live before writing.
         SerialDisNet* net = system->get_serial_network();
-        
-        double Vs = cell.H.det() / ((double)Ngrid*Ngrid*Ngrid);
+        for (int i = 0; i < (int)vcl.size(); i++)
+            net->nodes[i].v += vcl[i];
 
-        deposit_network(system->get_device_network(), 1.0);
-        solve_poisson();
-        interpolate_nodes(system->get_device_network());
-
-        auto h_cnode = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cnode);
-        double cmin = 1e300, cmax = -1e300;
-        for (int i = 0; i < (int)h_cnode.extent(0); i++) {
-            cmin = fmin(cmin, h_cnode(i));
-            cmax = fmax(cmax, h_cnode(i));
+        // diagnostic: separation of the two C1 lines and climb speed
+        double y_low = 0.0, y_high = 0.0, v_low = 0.0;
+        int n_low = 0, n_high = 0;
+        for (int i = 0; i < (int)net->nodes.size(); i++) {
+            double y = net->nodes[i].pos.y;
+            if (y < 0.5*L[1]) { y_low += y; v_low += vcl[i].y; n_low++; }
+            else              { y_high += y; n_high++; }
         }
-        printf("c at nodes: min %.6e  max %.6e  spread %.2e\n", cmin, cmax, cmax - cmin);
-
-        double a = 2.0*L[0]/Ngrid;
-        Vec3 x1(0.25*L[0], 0.25*L[1], 0.0), x2(0.75*L[0], 0.75*L[1], 0.0);
-        double expect = dipole_series(x1, x1, x2, 1.0, a, 100);
-        printf("node c: grid %.6e  series %.6e  rel. error %.2e\n",
-                cmin, expect, fabs(cmin - expect)/fabs(expect));
-
-        auto h_c = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c);
-        double h = L[0]/Ngrid;
-        
-        // int ij[2][2] = { {7, 7}, {7, 8} };
-        int m = Ngrid/4;                                  // line at 0.25*L sits between voxels m-1 and m
-        int ij[2][2] = { {m-1, m-1}, {m-1, m} };
-
-        for (int n = 0; n < 2; n++) {
-            int i = ij[n][0], j = ij[n][1];
-            Vec3 xc((i + 0.5)*h, (j + 0.5)*h, 0.5*h);    // voxel centre
-            double ex = dipole_series(xc, x1, x2, 1.0, a, 100);
-            double gr = h_c(i, j, 0).real();
-            printf("voxel (%d,%d): grid %.6e  series %.6e  rel. error %.2e\n",
-                   i, j, gr, ex, fabs(gr - ex)/fabs(ex));
-        }
+        if (n_low > 0 && n_high > 0)
+            printf("climb: CG %d it   separation %.3f   v_y(lower) %.4e\n",
+                   cit, y_high/n_high - y_low/n_low, v_low/n_low);
 
         Kokkos::fence();
         system->timer[system->TIMER_DIFFUSION].stop();
+    }
+
+
+    void climb_velocity(System* system, std::vector<Vec3>& vcl, std::vector<double>& hsol, int& iters) {
+        SerialDisNet* net = system->get_serial_network();
+        int n = net->nodes.size();
+
+        std::vector<Vec3> ecl; std::vector<double> be, fcl;
+        climb_force(net, ecl, be, fcl);
+
+        T_nodeval b ("Diffusion::rhs", n);
+        auto hb = Kokkos::create_mirror_view(b);
+        for (int i = 0; i < n; i++) {
+            double g = (be[i] > 1e-10) ? fcl[i]/be[i] : 0.0;
+            hb(i) = c0*(exp(-g*Omega/kT) - 1.0);
+        }
+        Kokkos::deep_copy(b, hb);
+
+        auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solve_cg(system, b, 100, 1e-10, iters));
+
+        vcl.assign(n, Vec3(0.0));
+        hsol.assign(n, 0.0);
+        for (int i = 0; i < n; i++) {
+            hsol[i] = h(i);
+            if (be[i] > 1e-10) vcl[i] = (h(i)/be[i])*ecl[i];
+        }
 
     }
 
@@ -342,7 +360,7 @@ public:
         }
     }
 
-    void deposit_network(DeviceDisNet* net, double hval) {
+    void deposit_network(DeviceDisNet* net, T_nodeval hnode) {
         Kokkos::deep_copy(c, complex(0.0, 0.0));
 
         auto c      = this->c;
@@ -353,8 +371,10 @@ public:
 
         Kokkos::parallel_for("Diffusion::DepositNetwork", net->Nsegs_local, KOKKOS_LAMBDA(const int i) {
             Vec3 r1 = nodes[segs[i].n1].pos;
-            Vec3 r2 = nodes[segs[i].n2].pos;
-            deposit_one(c, cell, N, r1, r2, hval);
+            Vec3 r2 = cell.pbc_position(r1, nodes[segs[i].n2].pos);
+            Vec3 mid = 0.5*(r1 + r2);
+            deposit_one(c, cell, N, r1, mid, hnode(segs[i].n1));
+            deposit_one(c, cell, N, mid, r2, hnode(segs[i].n2));
         });
         Kokkos::fence();
     }
@@ -530,7 +550,7 @@ public:
         Kokkos::fence();
     }
 
-    double segment_correction(Vec3 x, Vec3 r1, Vec3 r2, double lam, double a) {
+    double segment_correction(Vec3 x, Vec3 r1, Vec3 r2, double lam, double a, double a0 = 0.0) {
         r2 = cell.pbc_position(r1, r2);
         Vec3 mid = 0.5*(r1 + r2);
         Vec3 shift = cell.pbc_position(x, mid) - mid;
@@ -547,6 +567,7 @@ public:
         double d2 = fmax((r1 - x).norm2() - z1*z1, 0.0);
         double d = sqrt(d2);
         double ba = sqrt(d2 + a*a);
+        double b0 = sqrt(d2 + a0*a0);
 
         auto I1 = [](double z1, double z2, double b) {
             return asinh(z2/b) - asinh(z1/b);
@@ -556,7 +577,120 @@ public:
             return z2/(b*b*sqrt(z2*z2 + b*b)) - z1/(b*b*sqrt(z1*z1 + b*b));
         };
 
-        return -lam/(4.0*M_PI*D)*(I1(z1, z2, d) - I1(z1, z2, ba) - 0.5*a*a*I3(z1, z2, ba));
+        return -lam/(4.0*M_PI*D)*( I1(z1, z2, b0) + 0.5*a0*a0*I3(z1, z2, b0) - I1(z1, z2, ba) - 0.5*a*a*I3(z1, z2, ba) );
+    }
+
+    double node_correction(SerialDisNet* net, T_nodeval::HostMirror hn, Vec3 x, double a, double a0) {
+        double sum = 0.0;
+        for (int i = 0; i < (int)net->segs.size(); i++) {
+            int n1 = net->segs[i].n1, n2 = net->segs[i].n2;
+            Vec3 r1 = net->nodes[n1].pos;
+            Vec3 r2 = cell.pbc_position(r1, net->nodes[n2].pos);
+            Vec3 mid = 0.5*(r1 + r2);
+            sum += segment_correction(x, r1,  mid, hn(n1), a, a0);
+            sum += segment_correction(x, mid, r2,  hn(n2), a, a0);
+        }
+        return sum;
+    }
+
+        T_nodeval apply_A(System* system, T_nodeval hnode) {
+        DeviceDisNet* d_net = system->get_device_network();
+        SerialDisNet* net   = system->get_serial_network();
+
+        deposit_network(d_net, hnode);
+        solve_poisson();
+        interpolate_nodes(d_net);                 // grid part → cnode
+
+        // short-range part, on the host for now
+        auto hn = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), hnode);
+        auto cn = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cnode);
+        double a = 2.0*L[0]/Ngrid;
+        for (int i = 0; i < (int)net->nodes.size(); i++)
+            cn(i) += node_correction(net, hn, net->nodes[i].pos, a, a0);
+
+        T_nodeval out("Diffusion::Ah", cn.extent(0));
+        Kokkos::deep_copy(out, cn);
+        return out;
+    }
+
+    T_nodeval solve_cg(System* system, T_nodeval b, int maxit, double tol,int& iters) {
+        int n = b.extent(0);
+        auto hb = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), b);
+
+        std::vector<double> x(n, 0.0), r(n), p(n);
+        for (int i = 0; i < n; i++) { r[i] = -hb(i); p[i] = r[i]; }
+
+        auto dot = [&](const std::vector<double>& u, const std::vector<double>& v) {
+            double s = 0.0;
+            for (int i = 0; i < n; i++) s += u[i]*v[i];
+            return s;
+        };
+        double rr = dot(r, r), rr0 = rr;
+
+        T_nodeval pv("Diffusion::p", n);
+        auto hp = Kokkos::create_mirror_view(pv);
+
+        for (iters = 0; iters < maxit && sqrt(rr/rr0) > tol; iters++) {
+            for (int i =0; i < n; i++) hp(i) = p[i];
+            Kokkos::deep_copy(pv, hp);
+            auto Ap = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), apply_A(system, pv));
+
+            double pAp = 0.0;
+            for (int i = 0; i < n; i++) pAp += p[i]*(-Ap(i));
+            double alpha = rr/pAp;
+
+            for (int i = 0; i < n; i++) {
+                x[i] += alpha*p[i];
+                r[i] -= alpha*(-Ap(i));
+            }
+
+            double rr_new = dot(r, r);
+            double beta = rr_new/rr;
+            for (int i = 0; i < n; i++) p[i] = r[i] + beta*p[i];
+            rr = rr_new;
+        }
+
+        T_nodeval xv("Diffusion::h", n);
+        auto hx = Kokkos::create_mirror_view(xv);
+        for (int i = 0; i < n; i++) hx(i) = x[i];
+        Kokkos::deep_copy(xv, hx);
+        return xv;
+    }
+
+    void climb_force(SerialDisNet* net, std::vector<Vec3>& ecl, std::vector<double>& be, std::vector<double>& fcl) {
+        int n = net->nodes.size();
+        std::vector<double> Lh(n, 0.0);
+        ecl.assign(n, Vec3(0.0));
+        be.assign(n, 0.0);
+        fcl.assign(n, 0.0);
+
+        for (int i = 0; i < (int)net->segs.size(); i++) {
+            int n1 = net->segs[i].n1, n2 = net->segs[i].n2;
+            Vec3 r1 = net->nodes[n1].pos;
+            Vec3 r2 = cell.pbc_position(r1, net->nodes[n2].pos);
+            Vec3 t = r2 - r1;
+            double len = t.norm();
+            if(len < 1e-10) continue;
+            Vec3 cb = cross((1.0/len)*t, net->segs[i].burg);
+
+            for (int n_ : {n1, n2}) {
+                Lh[n_]      += 0.5*len;
+                ecl[n_]     += 0.5*len*cb;
+                be[n_]      += 0.5*len*cb.norm();
+            }
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (Lh[i] <= 0.0) continue;
+            be[i] /= Lh[i];
+            double en = ecl[i].norm();
+            if (en > 1e-10) {
+                ecl[i] = (1.0/en)*ecl[i];
+                fcl[i] = dot(net->nodes[i].f, ecl[i]) / Lh[i];
+            } else {
+                ecl[i] = Vec3(0.0);
+            }
+        }
     }
 
     double line_correction(Vec3 x, double lam, double a, int nseg) {

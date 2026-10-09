@@ -79,6 +79,48 @@ void write_sigmah(System* system, Force* force, int Ngrid, double xcut,
     ExaDiS_log("Wrote %s and %s\n", vtkfile.c_str(), cutfile.c_str());
 }
 
+void write_network_vtk(System* system, std::string filename)
+{
+    SerialDisNet* net = system->get_serial_network();
+    int ns = net->segs.size();
+
+    FILE* fp = fopen(filename.c_str(), "w");
+    fprintf(fp, "# vtk DataFile Version 3.0\n");
+    fprintf(fp, "ExaDiS network\n");
+    fprintf(fp, "ASCII\n");
+    fprintf(fp, "DATASET POLYDATA\n");
+
+    fprintf(fp, "POINTS %d double\n", 2*ns);
+    for (int i = 0; i < ns; i++) {
+        Vec3 r1 = net->nodes[net->segs[i].n1].pos;
+        Vec3 r2 = net->cell.pbc_position(r1, net->nodes[net->segs[i].n2].pos);
+        fprintf(fp, "%f %f %f\n%f %f %f\n", r1.x, r1.y, r1.z, r2.x, r2.y, r2.z);
+    }
+
+    fprintf(fp, "LINES %d %d\n", ns, 3*ns);
+    for (int i = 0; i < ns; i++)
+        fprintf(fp, "2 %d %d\n", 2*i, 2*i + 1);
+
+    // Burgers vector per segment, so you can colour the lines by it
+    fprintf(fp, "CELL_DATA %d\n", ns);
+    fprintf(fp, "VECTORS burgers double\n");
+    for (int i = 0; i < ns; i++) {
+        Vec3 b = net->segs[i].burg;
+        fprintf(fp, "%f %f %f\n", b.x, b.y, b.z);
+    }
+    fclose(fp);
+}
+
+class C1App : public ExaDiSApp {
+public:
+    using ExaDiSApp::ExaDiSApp;                       // reuse the (argc, argv) constructor
+    void output(Control& ctrl) override {
+        ExaDiSApp::output(ctrl);                      // the usual .data / restart files
+        if (istep % ctrl.outfreq == 0)
+            write_network_vtk(system, outputdir + "/network." + std::to_string(istep) + ".vtk");
+    }
+};
+
 /*---------------------------------------------------------------------------
  *
  *    Function:     test_C1_edge_dipole
@@ -92,14 +134,14 @@ void test_C1_edge_dipole(ExaDiSApp* exadis)
     double NU = 0.29;
     double a = 1.0;
     double Mob = 1.0;
-    int Ngrid = 32;
+    int Ngrid = 64;
 
     double Lbox = 1000.0;
     double maxseg = 0.04*Lbox;
     double minseg = 0.01*Lbox;
     double dt = 1.0e-8;
     double rann = 2.0;
-    int nsteps = 100;
+    int nsteps = 2000;
 
     ExaDiSApp::Control ctrl;
     ctrl.nsteps = nsteps;
@@ -113,8 +155,11 @@ void test_C1_edge_dipole(ExaDiSApp* exadis)
     SerialDisNet* config = new SerialDisNet(Lbox); // fully periodic, origin at 0
     Vec3 ldir(0.0, 0.0, 1.0);
     Vec3 plane(0.0, 1.0, 0.0);
-    Vec3 p1(0.25*Lbox, 0.25*Lbox, 0.0);
-    Vec3 p2(0.75*Lbox, 0.75*Lbox, 0.0);
+    
+    double d = 0.1*Lbox;
+    Vec3 p1(0.5*Lbox, 0.5*Lbox - 0.5*d, 0.0);
+    Vec3 p2(0.5*Lbox, 0.5*Lbox + 0.5*d, 0.0);
+
     insert_infinite_line(config, Vec3( 1.0, 0.0, 0.0), plane, ldir, p1, Mat33().eye(), maxseg);
     insert_infinite_line(config, Vec3(-1.0, 0.0, 0.0), plane, ldir, p2, Mat33().eye(), maxseg);
 
@@ -166,7 +211,7 @@ int main(int argc, char* argv[])
 {
     Kokkos::ScopeGuard guard(argc, argv);
 
-    ExaDiS::ExaDiSApp exadis(argc, argv);
+    C1App exadis(argc, argv);
     test_C1_edge_dipole(&exadis);
 
     return 0;
