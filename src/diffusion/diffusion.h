@@ -271,7 +271,7 @@ public:
         for (int jb = jmin; jb <= jmax; jb++)
         for (int kb = kmin; kb <= kmax; kb++) {
             Vec3 bc((ib+0.5)*Hs.x, (jb+0.5)*Hs.y, (kb+0.5)*Hs.z);
-            double W = scale * ForceFFT::alpha_box_segment(r1, t, Ls, bc, Hs);
+            double W = scale * diffusion_alpha_box_segment(r1, t, Ls, bc, Hs);
 
             int kx = ib % Ngrid; if (kx < 0) kx += Ngrid;
             int ky = jb % Ngrid; if (ky < 0) ky += Ngrid;
@@ -350,7 +350,7 @@ public:
         for (int jb = jmin; jb <= jmax; jb++)
         for (int kb = kmin; kb <= kmax; kb++) {
             Vec3 bc((ib+0.5)*Hs.x, (jb+0.5)*Hs.y, (kb+0.5)*Hs.z);
-            double W = scale * ForceFFT::alpha_box_segment(r1, t, Ls, bc, Hs);
+            double W = scale * diffusion_alpha_box_segment(r1, t, Ls, bc, Hs);
 
             int kx = ib % N; if (kx < 0) kx += N;
             int ky = jb % N; if (ky < 0) ky += N;
@@ -404,6 +404,103 @@ public:
         return maxerr / scale;
     }
 
+    // Copied from ForceFFT::alpha_box_segment (force_fft.h)
+    KOKKOS_INLINE_FUNCTION
+    static double diffusion_alpha_box_segment(const Vec3 &p1, const Vec3 &t, const double &L,
+                             const Vec3 &bc, const Vec3 &H)
+    {
+        double eps = 1e-10;
+        Vec3 tinv(1.0/(t.x+eps), 1.0/(t.y+eps), 1.0/(t.z+eps));
+        
+        Vec3 t1 = bc - H - p1;
+        t1.x *= tinv.x; t1.y *= tinv.y; t1.z *= tinv.z;
+        Vec3 t2 = bc + H - p1;
+        t2.x *= tinv.x; t2.y *= tinv.y; t2.z *= tinv.z;
+        
+        Vec3 tmin(fmin(t1.x, t2.x), fmin(t1.y, t2.y), fmin(t1.z, t2.z));
+        Vec3 tmax(fmax(t1.x, t2.x), fmax(t1.y, t2.y), fmax(t1.z, t2.z));
+        
+        double cmin = fmax(fmax(tmin.x, tmin.y), tmin.z);
+        double cmax = fmin(fmin(tmax.x, tmax.y), tmax.z);
+        
+        cmin = fmax(cmin, 0.0);
+        cmax = fmin(cmax, L);
+        
+        Vec3 x1 = p1 + cmin * t;
+        Vec3 x2 = p1 + cmax * t;
+        double lx = (x2-x1).norm();
+        
+        double W = 0.0;
+        if (cmin <= cmax && lx >= eps) {
+            // Parametrize segment
+            Vec3 R = bc-x1;
+            double dr = dot(R, t);
+            Vec3 drt = dr * t;
+            Vec3 d = R-drt;
+            Vec3 x0 = x1+drt;
+            double s1 = dot(x1-x0, t);
+            double s2 = dot(x2-x0, t);
+            
+            Vec3 s;
+            s.x = (fabs(t.x) < eps) ? s2+1 : d.x/t.x;
+            s.y = (fabs(t.y) < eps) ? s2+1 : d.y/t.y;
+            s.z = (fabs(t.z) < eps) ? s2+1 : d.z/t.z;
+            
+            Vec3 sk;
+            sk.x = fmin(fmax(s.x, s1), s2);
+            sk.y = fmin(fmax(s.y, s1), s2);
+            sk.z = fmin(fmax(s.z, s1), s2);
+            
+            // First term
+            W = s2-s1;
+            
+            // Second term Ai
+            for (int k = 0; k < 3; k++) {
+                W -= 1.0/H[k]*fabs(0.5*(sk[k]-s1)*(2.0*d[k]-t[k]*(sk[k]+s1)));
+                W -= 1.0/H[k]*fabs(0.5*(s2-sk[k])*(2.0*d[k]-t[k]*(s2+sk[k])));
+            }
+    
+            // Third term Bij
+            for (int k = 0; k < 3; k++) {
+                int i1 = k;
+                int i2 = (k+1) % 3;
+                double sm1 = fmin(sk[i1], sk[i2]);
+                double sm2 = fmax(sk[i1], sk[i2]);
+                double ss[4] = {s1, sm1, sm2, s2};
+                double B = 0.0;
+                for (int l = 0; l < 3; l++) {
+                    double ss1 = ss[l];
+                    double ss2 = ss[l+1];
+                    B += fabs(d[i1]*d[i2]*(ss2-ss1)
+                    -0.5*(d[i1]*t[i2]+d[i2]*t[i1])*(ss2*ss2-ss1*ss1)
+                    +1.0/3.0*t[i1]*t[i2]*(ss2*ss2*ss2-ss1*ss1*ss1));
+                }
+                W += 1.0/H[i1]/H[i2]*B;
+            }
+            
+            // Forth term Cijk
+            double sm1 = fmin(sk[0], sk[1]);
+            double sm2 = fmax(sk[0], sk[1]);
+            double sn1 = fmin(sm1, sk[2]);
+            double si2 = fmax(sm1, sk[2]);
+            double sn2 = fmin(sm2, si2);
+            double sn3 = fmax(sm2, si2);
+            double ss[5] = {s1, sn1, sn2, sn3, s2};
+            double C = 0.0;
+            for (int l = 0; l < 4; l++) {
+                double ss1 = ss[l];
+                double ss2 = ss[l+1];
+                C += fabs(d[0]*d[1]*d[2]*(ss2-ss1)
+                -0.5*(t[0]*d[1]*d[2]+d[0]*t[1]*d[2]+d[0]*d[1]*t[2])*(ss2*ss2-ss1*ss1)
+                +1.0/3.0*(d[0]*t[1]*t[2]+t[0]*d[1]*t[2]+t[0]*t[1]*d[2])*(ss2*ss2*ss2-ss1*ss1*ss1)
+                -0.25*(t[0]*t[1]*t[2])*(ss2*ss2*ss2*ss2-ss1*ss1*ss1*ss1));
+            }
+            W -= 1.0/H[0]/H[1]/H[2]*C;
+        }
+        
+        return W;
+    }
+
     double total() {
         auto h_c = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c);
         double sum = 0.0;
@@ -415,7 +512,9 @@ public:
     }
 
     T_grid::HostMirror snapshot() {
-        return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c);
+        auto h_c = Kokkos::create_mirror_view(c);
+        Kokkos::deep_copy(h_c, c);
+        return h_c;
     }
 
     void fft_roundtrip() {
@@ -602,7 +701,8 @@ public:
         interpolate_nodes(d_net);                 // grid part → cnode
 
         // short-range part, on the host for now
-        auto hn = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), hnode);
+        auto hn = Kokkos::create_mirror_view(hnode);
+        Kokkos::deep_copy(hn, hnode);
         auto cn = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cnode);
         double a = 2.0*L[0]/Ngrid;
         for (int i = 0; i < (int)net->nodes.size(); i++)
