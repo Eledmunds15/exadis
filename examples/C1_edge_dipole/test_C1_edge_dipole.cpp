@@ -116,8 +116,11 @@ public:
     using ExaDiSApp::ExaDiSApp;                       // reuse the (argc, argv) constructor
     void output(Control& ctrl) override {
         ExaDiSApp::output(ctrl);                      // the usual .data / restart files
-        if (istep % ctrl.outfreq == 0)
+        if (istep % ctrl.outfreq == 0) {
             write_network_vtk(system, outputdir + "/network." + std::to_string(istep) + ".vtk");
+            if (diffusion)
+                diffusion->write_vtk(system, outputdir + "/diffusion." + std::to_string(istep) + ".vtk");
+        }
     }
 };
 

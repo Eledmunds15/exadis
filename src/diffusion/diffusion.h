@@ -35,8 +35,13 @@ public:
     Cell cell;
     bool initialized = false;
     Kokkos::View<double*, T_memory_space> cnode;
-    
+    std::vector<double> hlast;               // nodal h from the last compute(), for output
+
     typedef Kokkos::View<double*, T_memory_space> T_nodeval;
+    
+    bool use_fixed_rhs;  
+    double fixed_rhs;
+    
     double burgmag = 2.48e-10;               // m
     double Omega   = 0.7698*pow(burgmag, 3); // atomic volume, m^3 (bcc: 0.7698 b^3)
     double kT      = 1.380649e-23*800.0;     // J (T = 800 K)
@@ -105,6 +110,7 @@ public:
         // solve for h and the climb velocity at every node
         std::vector<Vec3> vcl; std::vector<double> hcl; int cit;
         climb_velocity(system, vcl, hcl, cit);
+        hlast = hcl;
 
         // add climb on top of the glide velocity from mobility.
         // Re-fetch: apply_A switched the active copy, so make the serial one live before writing.
@@ -128,6 +134,41 @@ public:
         system->timer[system->TIMER_DIFFUSION].stop();
     }
 
+
+    // Write the grid (long-range) part of c for the last solved h as a legacy VTK file.
+    // After CG, c holds A*p rather than the solution, so re-deposit h and re-solve first.
+    void write_vtk(System* system, std::string filename) {
+        if (!initialized || hlast.empty()) return;
+
+        T_nodeval h("Diffusion::hout", hlast.size());
+        auto hh = Kokkos::create_mirror_view(h);
+        for (int i = 0; i < (int)hlast.size(); i++) hh(i) = hlast[i];
+        Kokkos::deep_copy(h, hh);
+
+        deposit_network(system->get_device_network(), h);
+        solve_poisson();
+        auto hc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c);
+
+        int N = Ngrid;
+        double dx = L[0]/N; // cubic box
+        Vec3 origin = cell.origin + Vec3(0.5*dx);
+
+        FILE* fp = fopen(filename.c_str(), "w");
+        if (fp == NULL) ExaDiS_fatal("Error: cannot open %s\n", filename.c_str());
+        fprintf(fp, "# vtk DataFile Version 3.0\n");
+        fprintf(fp, "ExaDiS diffusion field c (grid part)\n");
+        fprintf(fp, "ASCII\nDATASET STRUCTURED_POINTS\n");
+        fprintf(fp, "DIMENSIONS %d %d %d\n", N, N, N);
+        fprintf(fp, "ORIGIN %e %e %e\n", origin.x, origin.y, origin.z);
+        fprintf(fp, "SPACING %e %e %e\n", dx, dx, dx);
+        fprintf(fp, "POINT_DATA %d\n", N*N*N);
+        fprintf(fp, "SCALARS c float 1\nLOOKUP_TABLE default\n");
+        for (int k = 0; k < N; k++)
+            for (int j = 0; j < N; j++)
+                for (int i = 0; i < N; i++)
+                    fprintf(fp, "%e\n", hc(i,j,k).real());
+        fclose(fp);
+    }
 
     void climb_velocity(System* system, std::vector<Vec3>& vcl, std::vector<double>& hsol, int& iters) {
         SerialDisNet* net = system->get_serial_network();
