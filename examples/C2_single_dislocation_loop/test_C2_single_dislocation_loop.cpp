@@ -74,7 +74,7 @@ struct CaseResult {
     int iters;
 };
 
-CaseResult run_case(double R, double Lbox, int N, int Ngrid, bool show_aij)
+CaseResult run_case(double R, double Lbox, int N, int Ngrid, bool show_aij, double a0fac = 1)
 {
     // Units of b throughout; r_d = diffusion->rd = 1 b
     double burgmag = 2.48e-10;
@@ -98,6 +98,7 @@ CaseResult run_case(double R, double Lbox, int N, int Ngrid, bool show_aij)
     );
     ForceFFT* fft = static_cast<ForceType::DDD_FFT_MODEL*>(force)->get_force2()->get_flong();
     Diffusion* diffusion = new Diffusion(fft, Ngrid);
+    diffusion->a0 *= a0fac;
 
     // Prescribed RHS: Delta c = c_inf - c0 exp(-g Omega/kT) = 1 at every node.
     // TODO(you): add these two members to Diffusion and use them in climb_velocity.
@@ -109,7 +110,7 @@ CaseResult run_case(double R, double Lbox, int N, int Ngrid, bool show_aij)
     std::vector<Vec3> vcl;
     std::vector<double> h;
     int iters;
-    diffusion->climb_velocity(system, vcl, h, iters);
+    diffusion->climb_velocity(system, vcl, h, iters, true, -1.0);
 
     double mean = 0.0;
     for (double hi : h) mean += hi;
@@ -153,23 +154,48 @@ int main(int argc, char* argv[])
 
     // 1. Discretisation: error vs N (paper: slope -2, until the box/core floor)
     printf("\n== N sweep (R = 200, L = 4000) ==\n");
-    for (int N : {6, 12, 25, 50, 100}) {
+    for (int N : {3, 6, 12, 25, 50, 100, 150, 200, 300}) {
         CaseResult r = run_case(200.0, 4000.0, N, Ngrid, N == 6);
         report("N", 200.0, 4000.0, N, r);
     }
 
     // 2. Periodic box: error should scale like R/L (net source + images)
     printf("\n== L sweep (R = 200, N = 50) ==\n");
-    for (double L : {2000.0, 4000.0, 8000.0}) {
+    for (double L : {1000.0, 2000.0, 4000.0, 8000.0, 1600.0}) {
         CaseResult r = run_case(200.0, L, 50, Ngrid, false);
         report("L", 200.0, L, 50, r);
     }
 
-    // 3. Loop size: a constant core offset shows up as a drift vs 1/ln(8R/r_d)
+    // 3. Same L sweep, but grid spacing L/Ngrid held fixed (separates box error from grid error)
+    printf("\n== L sweep, fixed spacing (R = 200, N = 50, L/Ngrid = 62.5) ==\n");
+    for (double L : {1000.0, 2000.0, 4000.0, 8000.0, 1600.0}) {
+        int Ng = (int)(Ngrid * L / 4000.0);
+        CaseResult r = run_case(200.0, L, 50, Ng, false);
+        report("Lh", 200.0, L, 50, r);
+    }
+
+    // 4. Loop size: a constant core offset shows up as a drift vs 1/ln(8R/r_d)
     printf("\n== R sweep (L = 20 R, N = 50) ==\n");
-    for (double R : {50.0, 100.0, 200.0, 400.0}) {
+    for (double R : {50.0, 100.0, 200.0, 400.0, 800.0, 1600.0}) {
         CaseResult r = run_case(R, 20.0*R, 50, Ngrid, false);
         report("R", R, 20.0*R, 50, r);
+    }
+
+    // 4. Check a0 dependence
+    printf("\n== a0 check: fixed spacing, L -> inf extrapolation (R = 200, N = 50) ==\n");
+    double fcal = 1.0/(0.691*sqrt(M_E));   // = 0.878
+    for (double f : {1.0, fcal}) {
+        double v4 = 0.0, v8 = 0.0;
+        for (double L : {4000.0, 8000.0}) {
+            int Ng = (int)(Ngrid*L/4000.0);   // 64, 128
+            CaseResult r = run_case(200.0, L, 50, Ng, false, f);
+            report("a0", 200.0, L, 50, r);
+            if (L == 4000.0) v4 = r.vnorm; else v8 = r.vnorm;
+        }
+        double vinf = 2.0*v8 - v4;             // removes the c/L box term
+        double e = expect(200.0);
+        printf("  a0fac=%.4f  v_inf=%.7f  expect=%.7f  relerr=% .3e\n",
+               f, vinf, e, (vinf - e)/e);
     }
 
     return 0;

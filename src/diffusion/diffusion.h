@@ -39,15 +39,15 @@ public:
 
     typedef Kokkos::View<double*, T_memory_space> T_nodeval;
     
-    bool use_fixed_rhs;  
-    double fixed_rhs;
+    bool use_fixed_rhs = false;  
+    double fixed_rhs = -1;
     
     double burgmag = 2.48e-10;               // m
     double Omega   = 0.7698*pow(burgmag, 3); // atomic volume, m^3 (bcc: 0.7698 b^3)
     double kT      = 1.380649e-23*800.0;     // J (T = 800 K)
     double c0      = 1.0;                    // equilibrium vacancy fraction (scales v linearly)
     double rd      = 1.0;                    // core radius r_d, in b
-    double a0      = sqrt(M_E)*rd;          // Cai core width = sqrt(e)*r_d  (decision #1)
+    double a0      = rd/0.691;          // Cai core width = sqrt(e)*r_d  (decision #1)
 
     void initialize(System* system) {
         Mat33 H = system->get_serial_network()->cell.H;
@@ -109,7 +109,7 @@ public:
 
         // solve for h and the climb velocity at every node
         std::vector<Vec3> vcl; std::vector<double> hcl; int cit;
-        climb_velocity(system, vcl, hcl, cit);
+        climb_velocity(system, vcl, hcl, cit, use_fixed_rhs, fixed_rhs);
         hlast = hcl;
 
         // add climb on top of the glide velocity from mobility.
@@ -170,7 +170,7 @@ public:
         fclose(fp);
     }
 
-    void climb_velocity(System* system, std::vector<Vec3>& vcl, std::vector<double>& hsol, int& iters) {
+    void climb_velocity(System* system, std::vector<Vec3>& vcl, std::vector<double>& hsol, int& iters, bool use_fixed_rhs = false, double fixed_rhs = -1.0) {
         SerialDisNet* net = system->get_serial_network();
         int n = net->nodes.size();
 
@@ -181,7 +181,12 @@ public:
         auto hb = Kokkos::create_mirror_view(b);
         for (int i = 0; i < n; i++) {
             double g = (be[i] > 1e-10) ? fcl[i]/be[i] : 0.0;
-            hb(i) = c0*(exp(-g*Omega/kT) - 1.0);
+            
+            if (use_fixed_rhs) {
+                hb(i) = fixed_rhs;
+            } else {
+                hb(i) = c0*(exp(-g*Omega/kT) - 1.0);
+            }
         }
         Kokkos::deep_copy(b, hb);
 
