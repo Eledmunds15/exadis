@@ -102,7 +102,7 @@ struct OpRec {
                    &dEp[2][0], &dEp[2][1], &dEp[2][2],
                    &dWp[0][0], &dWp[0][1], &dWp[0][2],
                    &dWp[1][0], &dWp[1][1], &dWp[1][2],
-                   &dWp[2][0], &dWp[2][1], &dEp[2][2]);
+                   &dWp[2][0], &dWp[2][1], &dWp[2][2]);
         }
         inline void write(FILE* fp) {
             fprintf(fp, "%d %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n",
