@@ -147,11 +147,10 @@ public:
         
         int nconn = network->conn[i].num;
         int inew = network->split_node(i, arms);
-        // Update the plastic strain to avoid topological flickers
+        // Update the plastic strain to avoid topological flickers and node positions
         network->update_node_plastic_strain(i, network->nodes[i].pos, p0, system->dEp);
-        network->update_node_plastic_strain(inew, network->nodes[inew].pos, p1, system->dEp);
-        // Update nodes position
         network->nodes[i].pos = network->cell.pbc_fold(p0);
+        network->update_node_plastic_strain(inew, network->nodes[inew].pos, p1, system->dEp);
         network->nodes[inew].pos = network->cell.pbc_fold(p1);
         
         // Flag physical corner nodes for 3-node splitting

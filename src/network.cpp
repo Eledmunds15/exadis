@@ -208,6 +208,7 @@ bool SerialDisNet::merge_nodes_position(int n1, int n2, const Vec3& pos, Mat33& 
     // Update the plastic strain as needed
     Mat33 dEp_updt = Mat33().zero();
     update_node_plastic_strain(n1, nodes[n1].pos, pos, dEp_updt);
+    nodes[n1].pos = pos; // update n1 to avoid double counting in dEp
     update_node_plastic_strain(n2, nodes[n2].pos, pos, dEp_updt);
     
     // Update nodes connectivity
